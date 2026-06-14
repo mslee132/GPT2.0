@@ -6,13 +6,13 @@ from torch.utils.data import Dataset, DataLoader
 from pathlib import Path
 import subprocess
 
-if not Path("input.txt").exists():
+if not Path("data/shakespeare.txt").exists():
     subprocess.run([
         "wget", "-q",
-        "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
+        "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/data/shakespeare.txt"
     ])
 
-text = open("input.txt", "r", encoding="utf-8").read()
+text = open("data/shakespeare.txt", "r", encoding="utf-8").read()
 chars = sorted(list(set(text)))                                      # 텍스트에 등장하는 모든 문자들을 중복 없이 모아서 정렬
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for ch, i in stoi.items()}
@@ -162,7 +162,7 @@ for epoch in range(100):                                                        
 @torch.no_grad()                                                                # 생성할 땐 gradient 계산 안함 (학습할 때만 함)
 def sample_gpt(model, block_size, stoi, itos, device, start_text="ROMEO:", max_new_tokens=400): # 최대 400글자 생성
     model.eval()                                                                # 평가 모드 -> Dropout(0.1) 비활성화
-    context = torch.zeros((1, block_size), dtype=torch.long, device=device).    # (0,0,0,,,,,0) shape (1,64)
+    context = torch.zeros((1, block_size), dtype=torch.long, device=device)    # (0,0,0,,,,,0) shape (1,64)
     for ch in start_text:                                                       # start text 넣기
         if ch in stoi:
             ix = torch.tensor([[stoi[ch]]], device=device)
