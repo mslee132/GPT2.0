@@ -168,7 +168,7 @@ def sample_gpt(model, block_size, stoi, itos, device, start_text="Once upon a ti
         logits = logits[:, -1, :]                                               # 우리는 다음 글자 하나만 필요하니까 마지막 위치만 사용
         probs = F.softmax(logits, dim=-1)                                       # 확률로 변환
         ix = torch.multinomial(probs, num_samples=1)                            # 문자 샘플링 (다양하게 뽑혀야 하므로 argmax 쓰면 너무 단조로워짐)
-        out.append(itos[ix.item()])                                             # 출력에 GPT가 예상한 다음 글자 붙이기
+        out.append(itos[ix.item()])                                             # 출력에 GPT가 예상한 다음 글자 붙이기. ix.item(): tensor에서 값을 꺼내서 숫자로 바꿔줌
         context = torch.cat([context[:, 1:], ix], dim=1)                        # 예상한 다음 글자까지로 context 업데이트
     return "".join(out)                                                         # 반환할 때 글자 배열 읽기 쉽도록 바꾸기
 
