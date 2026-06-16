@@ -1,75 +1,73 @@
 ## 0. Dataset & DataLoader
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from pathlib import Path
+import torch                                                         # pytorch 라이브러리 불러오기
+import torch.nn as nn                                                # nn을 구성하는 layer와 모델 구조를 모아놓은 모듈
+import torch.nn.functional as F                                      # nn에서 자주 사용하는 함수를 모아놓은 모듈
+from torch.utils.data import Dataset, DataLoader                     # 데이터를 효율적으로 불러올 수 있는 모듈
+from pathlib import Path                                             # 파일의 경로를 다루기 쉽게 해주는 모듈
 
-data_path = Path("data/tinystories.txt")
+data_path = Path("data/tinystories.txt")                             
 
-text = open(data_path, "r", encoding="utf-8").read()
-
-text = open("data/shakespeare.txt", "r", encoding="utf-8").read()
+text = open(data_path, "r", encoding="utf-8").read()                 # r: read mode, encoding: utf-8로 읽기(영어 아닌 문자도 포함됨)
 chars = sorted(list(set(text)))                                      # 텍스트에 등장하는 모든 문자들을 중복 없이 모아서 정렬
-stoi = {ch: i for i, ch in enumerate(chars)}
-itos = {i: ch for ch, i in stoi.items()}
+stoi = {ch: i for i, ch in enumerate(chars)}                         # {문자:숫자} 딕셔너리
+itos = {i: ch for ch, i in stoi.items()}                             # {숫자:문자} 딕셔너리, sto.items: 윗줄의 {문자:숫자} 딕셔너리의 각 쌍
 vocab_size = len(chars)                                              # TinyStories에서는 약 90개 문자(알파벳, 숫자, 문장부호 등)
-data = torch.tensor([stoi[ch] for ch in text], dtype=torch.long)
+data = torch.tensor([stoi[ch] for ch in text], dtype=torch.long)     # 텍스트를 숫자로 변환한 뒤 torch tensor로 바꿔줌
 
 class NextTokenDataset(Dataset):
-    def __init__(self, data, block_size):
+    def __init__(self, data, block_size):                            # 데이터셋 객체 생성될 때 필요한 정보 저장
         self.data = data
         self.block_size = block_size
 
-    def __len__(self):
+    def __len__(self):                                               # for문 돌리려면 길이 필요 -> 데이터셋 크기 반환
         return len(self.data) - self.block_size                      # 끝에서 block size를 제외한 부분까지만 가능
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx):                                      # 몇번째꺼 뽑아달라고 할 때 필요 -> 특정 샘플 반환
         x = self.data[idx : idx + self.block_size]                   # idx부터 idx + self.block_size까지
         y = self.data[idx + 1 : idx + self.block_size + 1]           # idx+1부터 idx + self.block_size + 1까지 (x보다 한칸씩 밀림)
         return x, y
 
-block_size = 64
+block_size = 64                                                      # 모델이 한번에 볼 수 있는 최대 토큰(문자) 개수, or 문장의 길이
 dataset = NextTokenDataset(data, block_size)                         # 전체 텍스트 데이터를 이용해서 x, y를 생성할 수 있는 dataset을 만듦
-loader = DataLoader(dataset, batch_size=64, shuffle=True)            # dataloader가 dataset에서 샘플들을 꺼내서 학습시킴
+loader = DataLoader(dataset, batch_size=64, shuffle=True)            # dataloader가 dataset에서 샘플들을 꺼내서 학습시킴, batchsize: 한번에 보는 문장 개수
 xb, yb = next(iter(loader))                                          # 첫번째 batch를 꺼내서 확인하는 용도
 
 
 ## 1. Multi-head Attention
-class Head(nn.Module):
+class Head(nn.Module):                                               # 단어들 사이의 특정 관계를 학습하는 모듈
     def __init__(self, emb_dim, head_size, block_size, dropout=0.1):
-        super().__init__()
-        self.key = nn.Linear(emb_dim, head_size, bias=False)         # 입력dim=emb_dim, 출력dim=head_size
-        self.query = nn.Linear(emb_dim, head_size, bias=False)       # "
-        self.value = nn.Linear(emb_dim, head_size, bias=False)       # "
+        super().__init__()                                           # 부모 class(=nn.Module)의 init을 실행하라
+        self.key = nn.Linear(emb_dim, head_size, bias=False)         # (B,T,128)-> (B,T,32). 각 토큰을 key 벡터로 변환
+        self.query = nn.Linear(emb_dim, head_size, bias=False)       # (B,T,128)-> (B,T,32). 각 토큰을 query 벡터로 변환
+        self.value = nn.Linear(emb_dim, head_size, bias=False)       # (B,T,128)-> (B,T,32). 각 토큰을 value 벡터로 변환
         self.register_buffer("tril", torch.tril(torch.ones(block_size, block_size))) #lower triangular matrix 생성
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        B, T, C = x.shape          #batch size(한 번에 몇개의 문장을 학습하는가), time step(각 문장이 몇글자인지), channel(embedding dimension)
-        k = self.key(x)
-        q = self.query(x)
-        v = self.value(x)
-        wei = q @ k.transpose(-2, -1) * (k.size(-1) ** -0.5)
+        B, T, C = x.shape          # (64,64,128). batch size(한 번에 몇개의 문장을 학습하는가), time step(각 문장이 몇글자인지), channel(embedding dimension)
+        k = self.key(x)                                                 # (64,64,32)
+        q = self.query(x)                                               # (64,64,32)
+        v = self.value(x)                                               # (64,64,32)
+        wei = q @ k.transpose(-2, -1) * (k.size(-1) ** -0.5)            # (64,64,32)@(64,32,64) -> (64,64,64). k.size(-1) ** -0.5: attention이 너무 커지는 것을 방지
         wei = wei.masked_fill(self.tril[:T, :T] == 0, float("-inf"))    # lower triangular matrix의 0 부분에 -inf를 채워넣어서 미래를 볼 수 없도록
         wei = F.softmax(wei, dim=-1)                                    # attention weight를 확률값처럼 만듦
         wei = self.dropout(wei)                                         # 일부 연결을 랜덤하게 끊어서 overfitting 방지
-        out = wei @ v
+        out = wei @ v                                                   # (B,T,head_size)=(64,64,32)
         return out
 
-class MultiHeadAttention(nn.Module):                                    # 여러 head를 묶음
+class MultiHeadAttention(nn.Module):                                    # 여러 head를 묶음. head의 크기를 낮추고, 각 head가 다른 패턴을 학습하도록 함
     def __init__(self, emb_dim, num_heads, block_size, dropout=0.1):    # dropout: 90%는 유지하고 10%만 제거
         super().__init__()                                              # 부모 class(=nn.Module)의 init을 실행하라
-        head_size = emb_dim // num_heads
+        head_size = emb_dim // num_heads                                # 32 = 128//4. head가 4개니까 head 하나당 32차원씩 학습하도록 함
         self.heads = nn.ModuleList([Head(emb_dim, head_size, block_size, dropout) for _ in range(num_heads)])    # head 여러개 생성
-        self.proj = nn.Linear(emb_dim, emb_dim)
+        self.proj = nn.Linear(emb_dim, emb_dim)                         # shape은 유지되지만, 이어붙이기만 하면 정보가 통합이 안되므로 linear projection 다시해서 정보 통합
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)             # 각 head를 출력해서 이어붙이면 (64, 64, 32)->(64, 64, 128)
-        out = self.proj(out)                                            # shape은 유지되지만, 이어붙이기만 하면 정보가 통합이 안되므로 linear projection 다시해서 정보 통합
+        out = self.proj(out)                                            
         out = self.dropout(out)                                         # overfitting 방지
-        return out                                                      # 최종 shape = (B,T,C) = (64,64,128)
+        return out                                                      # (64,64,32)짜리 head를 4개 이어붙였으므로 최종 shape = (B,T,C) = (64,64,128) 
     
 
 ## 2. FeedForward & Block
@@ -79,7 +77,7 @@ class FeedForward(nn.Module):                                           # ff: at
         self.net = nn.Sequential(
             nn.Linear(emb_dim, 4 * emb_dim),                            # 128차원->512차원으로 보내서 더 복잡한 패턴을 학습하게 함
             nn.ReLU(),                                                  # 비선형성을 추가해서 신경망이 단순한 선형변환만 하지 않게 함 -> 복잡한 패턴 학습가능
-            nn.Linear(4 * emb_dim, emb_dim),
+            nn.Linear(4 * emb_dim, emb_dim),                            # nn.Layer: 입력 벡터를 새로운 벡터로 변환
             nn.Dropout(dropout),
         )
     def forward(self, x):                                               # forward: 입력이 들어왔을 때 어떤 계산을 할지 정의하는 함수
@@ -94,7 +92,7 @@ class Block(nn.Module):                                                 # transf
         self.ffwd = FeedForward(emb_dim, dropout)                               # feedforward layer
 
     def forward(self, x):
-        x = x + self.sa(self.ln1(x))                                   # 원래 입력 더하기 for 원본 정보 보존 (residual connection)
+        x = x + self.sa(self.ln1(x))                                   # 원래 입력 더하기(원본 정보 보존하기 위해 (residual connection))
         x = x + self.ffwd(self.ln2(x))
         return x
 
@@ -108,8 +106,8 @@ class TinyGPT(nn.Module):
         self.blocks = nn.Sequential(*[
             Block(emb_dim, num_heads, block_size, dropout) for _ in range(num_layers)
         ])
-        self.ln_f = nn.LayerNorm(emb_dim)                  # 최종적으로 normalize
-        self.lm_head = nn.Linear(emb_dim, vocab_size)      # 128차원 특징을 90개의 문자 중 하나로 바꿈
+        self.ln_f = nn.LayerNorm(emb_dim)                  # final layer norm. transformer block을 통과한 출력값을 최종적으로 normalize
+        self.lm_head = nn.Linear(emb_dim, vocab_size)      # language model의 최종 출력층. 128차원 특징을 90개의 문자 중 하나로 바꿈
 
     def forward(self, x):
         B, T = x.shape
